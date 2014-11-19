@@ -30,8 +30,14 @@ def main(argv):
       if opt == '-h':
          print 'MyUndelete.py -b <binlog> -s <start position> -e <end position> [-i]'
          print ''
-         print 'The program expects that you have read access to the binary log'
+         print '  -b | --binlog=  : path of the binary log file'
+         print '  -s | --start=   : start position'
+         print '  -e | --end=     : stop position'
+         print '  -i | --insert   : consider also INSERT statements (by default, only DELETE)'
+         print ''
+         print 'Info: The program expects that you have read access to the binary log'
          print 'and you have all eventual MySQL credential in ~/.my.cnf'
+         print ''
          sys.exit()
       elif opt in ("-b", "--binlog"):
          binlog = arg
@@ -79,11 +85,14 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert):
   found_del = False 
   for line in iter(p2.stdout.readline, b''):
       base64line = line.rstrip()
-      decodedline= base64.b64decode(base64line)
+      try:
+        decodedline= base64.b64decode(base64line)
+      except:
+        print "ERROR: no valid event found !"
+        sys.exit(4) 
       old_header = decodedline[:10]
       new_header = list(old_header)
       event_type = old_header[4]
-      print repr(event_type)
       if event_type == '\x19':
          found_del = True
          print "ROW event : %s" % base64line
@@ -129,6 +138,8 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert):
             sys.exit(0) 
          else:
             print "Bye...bye... my data"
+  if not found_del:
+         print "Nothing to do..."
         
         
 
