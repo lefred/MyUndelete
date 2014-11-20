@@ -22,6 +22,7 @@ def main(argv):
    startpos = ''
    endpos = ''
    check_insert = False
+   check_update = False
    try:
       opts, args = getopt.getopt(argv,"hb:e:is:u",["binlog=","end=","insert","start=","update"])
    except getopt.GetoptError:
@@ -107,6 +108,7 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
         event_type = old_header[4]
       except:
          event_type = '' 
+      print "DEBUG: event_type = %s" % repr(event_type)
       if event_type == '\x19':
          found_del = True
          print "ROW event : %s" % base64line
