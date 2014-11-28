@@ -136,7 +136,7 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
          found_del = True
          print "ROW event : %s" % base64line
          print "Event type (%s) is an insert v2" % repr(event_type)
-         new_header[4] = chr('32') #\x25
+         new_header[4] = chr(32) #\x25
          new_encodedheader = base64.b64encode(''.join(new_header))[:-2]
          old_encodedheader = base64.b64encode(old_header)[:-2]
       elif event_type and ord(event_type) == 31 and check_update:
