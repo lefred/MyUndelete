@@ -11,9 +11,11 @@
 #
 # License: GPLv2 (c) Frederic Descamps
 
+import os
 import base64
 import sys, getopt
 import subprocess
+import tempfile
 import re
 from distutils.util import strtobool
 
@@ -95,7 +97,7 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
   for line in iter(p2.stdout.readline, b''):
       base64line = line.rstrip()
       try:
-        decodedline= base64.b64decode(base64line)
+        decodedline = base64.b64decode(base64line)
       except:
         print "ERROR: no valid event found !"
         sys.exit(4) 
@@ -108,35 +110,36 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
         event_type = old_header[4]
       except:
          event_type = '' 
-      print "DEBUG: event_type = %s" % repr(event_type)
-      if ord(event_type) == 25:
+      if event_type: print "DEBUG: event_type = %s -> %s" % (repr(event_type), ord(event_type))
+      if event_type and ord(event_type) == 25 :
          found_del = True
          print "ROW event : %s" % base64line
          print "Event type (%s) is a delete v1" % repr(event_type)
          new_header[4] = chr(23) #\x17
          new_encodedheader = base64.b64encode(''.join(new_header[:8]))[:-2]
          old_encodedheader = base64.b64encode(old_header[:8])[:-2]
-      elif ord(event_type) == 32:
+      elif event_type and ord(event_type) == 32:
          found_del = True
          print "ROW event : %s" % base64line
          print "Event type (%s) is a delete v2" % repr(event_type)
          new_header[4] = chr(30) #\x1e
          new_encodedheader = base64.b64encode(''.join(new_header))[:-2]
-      elif ord(event_type) == 23:
+         old_encodedheader = base64.b64encode(old_header)[:-2]
+      elif event_type and ord(event_type) == 23:
          found_del = True
          print "ROW event : %s" % base64line
          print "Event type (%s) is an insert v1" % repr(event_type)
          new_header[4] = chr(25) #\x19
          new_encodedheader = base64.b64encode(''.join(new_header[:8]))[:-2]
          old_encodedheader = base64.b64encode(old_header[:8])[:-2]
-      elif ord(event_type) == 30 and check_insert:
+      elif event_type and ord(event_type) == 30 and check_insert:
          found_del = True
          print "ROW event : %s" % base64line
          print "Event type (%s) is an insert v2" % repr(event_type)
          new_header[4] = chr('32') #\x25
          new_encodedheader = base64.b64encode(''.join(new_header))[:-2]
          old_encodedheader = base64.b64encode(old_header)[:-2]
-      elif ord(event_type) == 31 and check_update:
+      elif event_type and ord(event_type) == 31 and check_update:
          found_update = True
          print "ROW event : %s" % base64line
          print "Event type (%s) is an update v2" % repr(event_type)
@@ -161,10 +164,6 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
             print "Bye...bye... my data"
   if found_update:
       print "We got an update!!"
-      for i in binlog_event[:-1]:
-          print "Binlog line : %s" % i
-      for i in binlog_event[:-1]:
-          print "Binlog line decoded : %s" % repr(base64.b64decode(i))
       # let's  consider that the PK is always on one binlog line
       # check that we have currently the right binlog line 
       if base64.b64decode(binlog_event[0])[31] != "\xff":
@@ -172,114 +171,52 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           sys.exit(5)
       # find the "marker" and the PK
       to_find = base64.b64decode(binlog_event[0])[32] + base64.b64decode(binlog_event[0])[33]
-      got_it_in = -1
-      old_image = [None]*(len(binlog_event))
-      new_image = [None]*(len(binlog_event))
-      old_queue = [None]*(len(binlog_event))
-      got_position = False
-      position = False
-      old_header = False
-      for binlog_line in binlog_event:
-          got_it_in += 1
-          position = base64.b64decode(binlog_line).rfind(to_find)
-          print "Position = %d in line %d" % (position, got_it_in)
-          print "DEBUG : lenght of the event: %s" % len(binlog_line)
-          if not old_header:
-             old_header = base64.b64decode(binlog_line)[:32]
-          if got_it_in == (len(binlog_event)-2) and (len(binlog_event[got_it_in+1])<4):
-	      print "DEBUG: we are in the 2nd last binlog line"
-              take_x_bytes = 4 - len(binlog_event[got_it_in+1])
-              old_queue[got_it_in] = base64.b64decode(binlog_line)[-take_x_bytes:]
-              print "DEBUG: old_queue = %s" % repr(old_queue[got_it_in])
-          elif got_it_in == (len(binlog_event)-1):
-              # we need to keep the queue
-              print "DEBUG: we are in the last binlog line"
-              old_queue[got_it_in]  = base64.b64decode(binlog_line)[-4:]
-              print "DEBUG: old_queue = %s" % repr(old_queue[got_it_in])
-              if len(binlog_line) == 4:
-                old_image[got_it_in] = ""  
-                new_image[got_it_in] = ""  
-              continue
-          else:
-	      old_queue[got_it_in] = "" 
-          if not position and not got_position:
-              old_image[got_it_in] = base64.b64decode(binlog_line)
-              continue
-          elif position == 32 and got_it_in == 0:
-              # we need to find it on another line
-              old_header = base64.b64decode(binlog_line)[:32]
-              old_image[got_it_in] = base64.b64decode(binlog_line)[32:]
-              continue
-          else:              
-            if position:
-                got_position = True
-            if got_it_in == 0:
-                # now we need to retrieve the value from 32 to the position
-                # as the new value is also on the first line
-                print "DEBUG binlog_line : %s" % repr(binlog_line)
-                old_image[got_it_in]=base64.b64decode(binlog_line)[32:position]
-                print "DEBUG old_image : %s" % (old_image)
-            else:
-                old_image[got_it_in]=base64.b64decode(binlog_line)[:position]
+      
+      # let's concatenate to create the full binlog
+      binlog_event_str = "".join(binlog_event)
+      binlog_event_str_dec = base64.b64decode(binlog_event_str)
+      print "DEBUG: binlog_event = %s" % binlog_event_str
+      print "DEBUG: binlog_event = %s" % repr(binlog_event_str_dec)
+      # now we need to find the position of the first record's image
+      old_record_pos = 32
+      new_record_pos = base64.b64decode(binlog_event_str).rfind(to_find) 
+      print "DEBUG: fist record starts at %s and finishes at %s" % (old_record_pos, new_record_pos)
+      # TODO: find here all occurence of to_find[0] so the byte at [32] to find how may records
+      # are in the event, then for each of them we need to recreate everything
+      print "DEBUG : first record starts with %s and to_find = %s" % (repr(binlog_event_str_dec[32:34]), repr(to_find))
+      print "DEBUG : last record starts with %s" % repr(binlog_event_str_dec[new_record_pos:(new_record_pos+2)])
+      old_image = binlog_event_str_dec[32:new_record_pos]
+      new_image = binlog_event_str_dec[new_record_pos:-4]
+      print "DEBUG : old record = %s" % repr(old_image)
+      print "DEBUG : new record = %s" % repr(new_image)
+      new_binlog_event_str_dec = binlog_event_str_dec[0:32] + new_image + old_image + binlog_event_str_dec[-4:]
+      new_binlog_envent_str_enc = base64.b64encode(new_binlog_event_str_dec)
+      print "DEBUG : new ROW DEC = %s" % repr(new_binlog_event_str_dec) 
+      print "DEBUG : new ROW ENC = %s" % new_binlog_envent_str_enc
+      n = 76
+      new_binlog_list = [new_binlog_envent_str_enc[i:i+n] for i in range(0, len(new_binlog_envent_str_enc), n)]
+      
+      f_old = tempfile.NamedTemporaryFile(delete=False) 
+      for i in binlog_event:
+      	  f_old.write(re.escape(i) + "\n")
+      f_old.close()
+      f_new = tempfile.NamedTemporaryFile(delete=False)
+      for binlog_line  in new_binlog_list:
+          f_new.write(re.escape(binlog_line) + "\n")
+      f_new.close()
 
-            if got_it_in == (len(binlog_event)-2) and position:
-              new_image[got_it_in]=base64.b64decode(binlog_line)[position:-2]
-            elif got_it_in == (len(binlog_event)-2):
-              new_image[got_it_in]=base64.b64decode(binlog_line)[:-2]
-            elif position and len(binlog_event) == 1:
-              new_image[got_it_in]=base64.b64decode(binlog_line)[position:-4]
-            elif position: 
-              new_image[got_it_in]=base64.b64decode(binlog_line)[position:]
-            else:
-              new_image[got_it_in]=base64.b64decode(binlog_line)
-
-      replacement = []
-      original = []
-      # we need to rebuild the binary log event
-      print "DEBUG: %s" % len(binlog_event)
-      for i in range(len(binlog_event)):
-          print "   EVENT (%s) : %s" % (i, repr(base64.b64decode(binlog_event[i])))
-          print "   EVENT (%s) : %s" % (i, binlog_event[i])
-          print "   old_header : %s (%s)" % (repr(old_header), base64.b64encode(old_header))
-          print "   old_image  : %s (%s)" % (repr(old_image[i]), base64.b64encode(old_image[i]))
-          print "   new_image  : %s (%s)" % (repr(new_image[i]), base64.b64encode(new_image[i]))
-          print "   old_queue  : %s (%s)" % (repr(old_queue[i]), base64.b64encode(old_queue[i]))
-          str = ""
-          if i == 0:
-             str = old_header + new_image[i]
-          elif new_image[i]: 
-             str = str + new_image[i]
-          if old_image[i]:
-             str = str + old_image[i]
-          if old_queue[i]:
-             str = str + old_queue[i]
-          #replacement.append(base64.b64encode(str))
-          #original.append(binlog_event[i])
-          print "  new : %s" % repr(str)
-          replacement.append(re.escape(base64.b64encode(str)).replace('\\+','+'))
-          original.append(re.escape(binlog_event[i]).replace('\\+','+'))
-	  
-      print "OLD : " 
-      print  original
-      print "NEW : " 
-      print replacement
       if user_yes_no_query("Ready to revert the statement ?"):
           c1 = ['/usr/bin/sudo', '/usr/bin/mysqlbinlog', '--start-position=%s' % startpos, '--stop-position=%s' % endpos, binlog]
           p1 = subprocess.Popen(c1, stdout=subprocess.PIPE)
+
+          c2 = ['/usr/bin/sudo', '/usr/bin/awk', 'BEGIN{ RS=\"\" } FILENAME==ARGV[1] { s=$0 } FILENAME==ARGV[2] { r=$0 } FILENAME==ARGV[3] { sub(s,r) ; print }',
+                f_old.name, f_new.name, "-"]  
+          p2 = subprocess.Popen(c2, stdin=p1.stdout, stdout=subprocess.PIPE)
           
-          tab_proc = {}
-          tab_cmd = {}
-          k = 0
-          for event in original:
-          	tab_cmd[k]  = ['sed', "s/^%s/%s/" % (original[0], replacement[0])]
-                if k == 0:
-          	   tab_proc[k] = subprocess.Popen(tab_cmd[k], stdin=p1.stdout, stdout=subprocess.PIPE)
-                else:
-          	   tab_proc[k] = subprocess.Popen(tab_cmd[k], stdin=tab_proc[k-1].stdout, stdout=subprocess.PIPE)
-         
           c3 = ['mysql']
-          p3 = subprocess.Popen(c3, stdin=tab_proc[k].stdout, stdout=subprocess.PIPE)
-         
+          p3 = subprocess.Popen(c3, stdin=p2.stdout)
+
+          print "please remove %s and %s" % (f_old.name, f_new.name)
           print "Done... I hope it worked ;)"
           sys.exit(0) 
       else:
