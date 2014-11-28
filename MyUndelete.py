@@ -77,6 +77,12 @@ def user_yes_no_query(question):
         except ValueError:
             sys.stdout.write('Please respond with \'y\' or \'n\'.\n')
 
+def findnth(haystack, needle, n):
+    parts= haystack.split(needle, n+1)
+    if len(parts)<=n+1:
+        return -1
+    return len(haystack)-len(parts[-1])-len(needle)
+
 
 def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
 
@@ -170,26 +176,33 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           print "ERROR: problem parsing binary log header"
           sys.exit(5)
       # find the "marker" and the PK
-      to_find = base64.b64decode(binlog_event[0])[32] + base64.b64decode(binlog_event[0])[33]
+      to_find = base64.b64decode(binlog_event[0])[32]
       
       # let's concatenate to create the full binlog
       binlog_event_str = "".join(binlog_event)
       binlog_event_str_dec = base64.b64decode(binlog_event_str)
       print "DEBUG: binlog_event = %s" % binlog_event_str
-      print "DEBUG: binlog_event = %s" % repr(binlog_event_str_dec)
-      # now we need to find the position of the first record's image
-      old_record_pos = 32
-      new_record_pos = base64.b64decode(binlog_event_str).rfind(to_find) 
-      print "DEBUG: fist record starts at %s and finishes at %s" % (old_record_pos, new_record_pos)
-      # TODO: find here all occurence of to_find[0] so the byte at [32] to find how may records
+      print "DEBUG: binlog_event_dec = %s" % repr(binlog_event_str_dec)
+
+      # find all occurence of to_find[0] so the byte at [32] to find how may records
       # are in the event, then for each of them we need to recreate everything
-      print "DEBUG : first record starts with %s and to_find = %s" % (repr(binlog_event_str_dec[32:34]), repr(to_find))
-      print "DEBUG : last record starts with %s" % repr(binlog_event_str_dec[new_record_pos:(new_record_pos+2)])
-      old_image = binlog_event_str_dec[32:new_record_pos]
-      new_image = binlog_event_str_dec[new_record_pos:-4]
-      print "DEBUG : old record = %s" % repr(old_image)
-      print "DEBUG : new record = %s" % repr(new_image)
-      new_binlog_event_str_dec = binlog_event_str_dec[0:32] + new_image + old_image + binlog_event_str_dec[-4:]
+      total_records_in_event = int(binlog_event_str_dec.count(to_find)) / 2
+      print "DEBUG : total occurence of records =  %s" % total_records_in_event
+      new_binlog_event_str_dec =  binlog_event_str_dec[0:32]
+      # TODO: loop on each records to rebuild them      
+      for i_rec in range(0, total_records_in_event):
+          old_record_pos = findnth(binlog_event_str_dec, to_find, i_rec * 2)
+          new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 1) 
+          new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
+          print "DEBUG: old %s record starts at %s and finishes at %s" % (i_rec, old_record_pos, new_record_pos)
+          print "DEBUG: new %s record starts at %s and finishes at %s" % (i_rec, new_record_pos, new_record_end_pos)
+          if new_record_end_pos == -1: new_record_end_pos = -4
+          old_image = binlog_event_str_dec[old_record_pos:new_record_pos]
+          new_image = binlog_event_str_dec[new_record_pos:new_record_end_pos]
+          print "DEBUG : old record = %s" % repr(old_image)
+          print "DEBUG : new record = %s" % repr(new_image)
+          new_binlog_event_str_dec = new_binlog_event_str_dec + new_image + old_image
+      new_binlog_event_str_dec = new_binlog_event_str_dec + binlog_event_str_dec[-4:]
       new_binlog_envent_str_enc = base64.b64encode(new_binlog_event_str_dec)
       print "DEBUG : new ROW DEC = %s" % repr(new_binlog_event_str_dec) 
       print "DEBUG : new ROW ENC = %s" % new_binlog_envent_str_enc
