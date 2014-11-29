@@ -228,8 +228,12 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           
           c3 = ['mysql']
           p3 = subprocess.Popen(c3, stdin=p2.stdout)
-
-          print "please remove %s and %s" % (f_old.name, f_new.name)
+          print "Sending to mysql..."
+          p1.wait()
+          p2.wait()
+          p3.wait()
+          os.unlink(f_old.name)
+          os.unlink(f_new.name)
           print "Done... I hope it worked ;)"
           sys.exit(0) 
       else:
