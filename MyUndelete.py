@@ -4,12 +4,13 @@
 # MyUndelete.py - MySQL undelete from ROW base binary logs
 #
 # Author : Frederic -lefred- Descamps <lefred@lefred.be>
-# Version: 0.1
-# Date   : 2014-11-19
+# Version: 0.2
+# Date   : 2014-11-29
 #
 # Use with care
 #
 # License: GPLv2 (c) Frederic Descamps
+
 
 import os
 import base64
@@ -19,16 +20,19 @@ import tempfile
 import re
 from distutils.util import strtobool
 
+debug = False
+
 def main(argv):
    binlog = ''
    startpos = ''
    endpos = ''
    check_insert = False
    check_update = False
+   global debug
    try:
-      opts, args = getopt.getopt(argv,"hb:e:is:u",["binlog=","end=","insert","start=","update"])
+      opts, args = getopt.getopt(argv,"hb:de:is:u",["binlog=","debug","end=","insert","start=","update"])
    except getopt.GetoptError:
-      print 'MyUndelete.py -b <binlog> -s <start position> -e <end position> [-i] [-u]'
+      print 'MyUndelete.py -b <binlog> -s <start position> -e <end position> [-i] [-u] [-d]'
       sys.exit(2)
    for opt, arg in opts:
       if opt == '-h':
@@ -39,6 +43,7 @@ def main(argv):
          print '  -e | --end=     : stop position'
          print '  -i | --insert   : consider also INSERT statements (by default, only DELETE)'
          print '  -u | --update   : consider also UPDATE statements (by default, only DELETE)'
+         print '  -d | --debug    : add debug messages'
          print ''
          print 'Info: The program expects that you have read access to the binary log'
          print 'and you have all eventual MySQL credential in ~/.my.cnf'
@@ -54,6 +59,8 @@ def main(argv):
          check_insert = True
       elif opt in ("-u", "--update"):
          check_update = True
+      elif opt in ("-d", "--debug"):
+         debug = True
 
    if binlog == '':
        print "ERROR: binlog file is required !"
@@ -83,6 +90,9 @@ def findnth(haystack, needle, n):
         return -1
     return len(haystack)-len(parts[-1])-len(needle)
 
+def p_debug(msg):
+    global debug
+    if debug: print "DEBUG: " + msg
 
 def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
 
@@ -116,44 +126,44 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
         event_type = old_header[4]
       except:
          event_type = '' 
-      if event_type: print "DEBUG: event_type = %s -> %s" % (repr(event_type), ord(event_type))
+      if event_type: p_debug("event_type = %s -> %s" % (repr(event_type), ord(event_type)))
       if event_type and ord(event_type) == 25 :
          found_del = True
-         print "ROW event : %s" % base64line
+         p_debug("ROW event : %s" % base64line)
          print "Event type (%s) is a delete v1" % repr(event_type)
          new_header[4] = chr(23) #\x17
          new_encodedheader = base64.b64encode(''.join(new_header[:8]))[:-2]
          old_encodedheader = base64.b64encode(old_header[:8])[:-2]
       elif event_type and ord(event_type) == 32:
          found_del = True
-         print "ROW event : %s" % base64line
+         p_debug("ROW event : %s" % base64line)
          print "Event type (%s) is a delete v2" % repr(event_type)
          new_header[4] = chr(30) #\x1e
          new_encodedheader = base64.b64encode(''.join(new_header))[:-2]
          old_encodedheader = base64.b64encode(old_header)[:-2]
       elif event_type and ord(event_type) == 23:
          found_del = True
-         print "ROW event : %s" % base64line
+         p_debug("ROW event : %s" % base64line)
          print "Event type (%s) is an insert v1" % repr(event_type)
          new_header[4] = chr(25) #\x19
          new_encodedheader = base64.b64encode(''.join(new_header[:8]))[:-2]
          old_encodedheader = base64.b64encode(old_header[:8])[:-2]
       elif event_type and ord(event_type) == 30 and check_insert:
          found_del = True
-         print "ROW event : %s" % base64line
+         p_debug("ROW event : %s" % base64line)
          print "Event type (%s) is an insert v2" % repr(event_type)
          new_header[4] = chr(32) #\x25
          new_encodedheader = base64.b64encode(''.join(new_header))[:-2]
          old_encodedheader = base64.b64encode(old_header)[:-2]
       elif event_type and ord(event_type) == 31 and check_update:
          found_update = True
-         print "ROW event : %s" % base64line
+         p_debug("ROW event : %s" % base64line)
          print "Event type (%s) is an update v2" % repr(event_type)
          binlog_event.append(base64line)
 
       if found_del:
-         print "Old header = %s" % old_encodedheader
-         print "New header = %s" % new_encodedheader
+         p_debug("Old header = %s" % old_encodedheader)
+         p_debug("New header = %s" % new_encodedheader)
          if user_yes_no_query("Ready to revert the statement ?"):
             c1 = ['/usr/bin/sudo', '/usr/bin/mysqlbinlog', '--start-position=%s' % startpos, '--stop-position=%s' % endpos, binlog]
             p1 = subprocess.Popen(c1, stdout=subprocess.PIPE)
@@ -181,31 +191,31 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
       # let's concatenate to create the full binlog
       binlog_event_str = "".join(binlog_event)
       binlog_event_str_dec = base64.b64decode(binlog_event_str)
-      print "DEBUG: binlog_event = %s" % binlog_event_str
-      print "DEBUG: binlog_event_dec = %s" % repr(binlog_event_str_dec)
+      if debug: p_debug("binlog_event = %s" % binlog_event_str)
+      if debug: p_debug("binlog_event_dec = %s" % repr(binlog_event_str_dec))
 
       # find all occurence of to_find[0] so the byte at [32] to find how may records
       # are in the event, then for each of them we need to recreate everything
       total_records_in_event = int(binlog_event_str_dec.count(to_find)) / 2
-      print "DEBUG : total occurence of records =  %s" % total_records_in_event
+      if debug: p_debug("total occurence of records =  %s" % total_records_in_event)
       new_binlog_event_str_dec =  binlog_event_str_dec[0:32]
       # TODO: loop on each records to rebuild them      
       for i_rec in range(0, total_records_in_event):
           old_record_pos = findnth(binlog_event_str_dec, to_find, i_rec * 2)
           new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 1) 
           new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
-          print "DEBUG: old %s record starts at %s and finishes at %s" % (i_rec, old_record_pos, new_record_pos)
-          print "DEBUG: new %s record starts at %s and finishes at %s" % (i_rec, new_record_pos, new_record_end_pos)
+          p_debug("old %s record starts at %s and finishes at %s" % (i_rec, old_record_pos, new_record_pos))
+          p_debug("new %s record starts at %s and finishes at %s" % (i_rec, new_record_pos, new_record_end_pos))
           if new_record_end_pos == -1: new_record_end_pos = -4
           old_image = binlog_event_str_dec[old_record_pos:new_record_pos]
           new_image = binlog_event_str_dec[new_record_pos:new_record_end_pos]
-          print "DEBUG : old record = %s" % repr(old_image)
-          print "DEBUG : new record = %s" % repr(new_image)
+          p_debug("DEBUG : old record = %s" % repr(old_image))
+          p_debug("new record = %s" % repr(new_image))
           new_binlog_event_str_dec = new_binlog_event_str_dec + new_image + old_image
       new_binlog_event_str_dec = new_binlog_event_str_dec + binlog_event_str_dec[-4:]
       new_binlog_envent_str_enc = base64.b64encode(new_binlog_event_str_dec)
-      print "DEBUG : new ROW DEC = %s" % repr(new_binlog_event_str_dec) 
-      print "DEBUG : new ROW ENC = %s" % new_binlog_envent_str_enc
+      p_debug("new ROW DEC = %s" % repr(new_binlog_event_str_dec)) 
+      p_debug("new ROW ENC = %s" % new_binlog_envent_str_enc)
       n = 76
       new_binlog_list = [new_binlog_envent_str_enc[i:i+n] for i in range(0, len(new_binlog_envent_str_enc), n)]
       
