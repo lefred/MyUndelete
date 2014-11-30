@@ -1,7 +1,18 @@
 MyUndelete
 ==========
 
-Undelete deleted rows from MySQL ROW binary logs
+Undelete deleted rows, delete inserted rows, revert updates from MySQL ROW binary logs.
+
+This is still alpha, certainly the un-update part that has been tested with only v2 ROW events.
+
+History
+=======
+After the nice blog post of Scott Noyes (http://thenoyes.com/littlenoise/?p=307), I decided to dig a bit more on the topic of undelete rows from the binary log.
+
+This script allows to undelete records from the BINARY LOG in ROW FORMAT but also revert INSERTs and UPDATEs.
+
+Syntax
+======
 
 ```
 MyUndelete.py -b <binlog> -s <start position> -e <end position> [-i] [-u]
