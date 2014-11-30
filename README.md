@@ -6,13 +6,14 @@ Undelete deleted rows, delete inserted rows, revert updates from MySQL ROW binar
 This is still alpha, certainly the un-update part that has been tested with only v2 ROW events.
 
 History
-=======
+-------
+
 After the nice blog post of Scott Noyes (http://thenoyes.com/littlenoise/?p=307), I decided to dig a bit more on the topic of undelete rows from the binary log.
 
 This script allows to undelete records from the BINARY LOG in ROW FORMAT but also revert INSERTs and UPDATEs.
 
 Syntax
-======
+------
 
 ```
 MyUndelete.py -b <binlog> -s <start position> -e <end position> [-i] [-u]
@@ -28,8 +29,10 @@ Info: The program expects that you have read access to the binary log
 and you have all eventual MySQL credential in ~/.my.cnf
 ```
 
-Examples
-========
+Example
+-------
+
+Delete an insert that happened in binary log mysqld-bin.000004 between positon 41989 and 42207.
 
 ```
 $ sudo ./MyUndelete.py -s 41989 -e 42207 -i -b /var/lib/mysql/mysqld-bin.000004
