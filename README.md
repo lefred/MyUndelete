@@ -31,6 +31,71 @@ and you have all eventual MySQL credential in ~/.my.cnf
 
 ## Example
 
+### Un-delete
+
+```
+mysql> select * from fred;
++----+------------+
+| id | name       |
++----+------------+
+|  1 | Fred       |
+|  2 | Jen        |
+|  3 | Wilhelmine |
+|  4 | Héloïse    |
+|  5 | Suhi       |
++----+------------+
+5 rows in set (0.00 sec)
+
+mysql> delete from fred where id >3;
+Query OK, 2 rows affected (0.04 sec)
+
+mysql> select * from fred;
++----+------------+
+| id | name       |
++----+------------+
+|  1 | Fred       |
+|  2 | Jen        |
+|  3 | Wilhelmine |
++----+------------+
+3 rows in set (0.00 sec)
+
+mysql> show binlog events in 'mysql-bin.000008';
++------------------+------+-------------+-----------+-------------+---------------------------------------+
+| Log_name         | Pos  | Event_type  | Server_id | End_log_pos | Info                                  |
++------------------+------+-------------+-----------+-------------+---------------------------------------+
+...
+| mysql-bin.000008 | 1514 | Query       |         1 |        1586 | BEGIN                                 |
+| mysql-bin.000008 | 1586 | Table_map   |         1 |        1636 | table_id: 72 (fred.fred)              |
+| mysql-bin.000008 | 1636 | Delete_rows |         1 |        1694 | table_id: 72 flags: STMT_END_F        |
+| mysql-bin.000008 | 1694 | Xid         |         1 |        1725 | COMMIT /* xid=146 */                  |
++------------------+------+-------------+-----------+-------------+---------------------------------------+
+
+$ sudo ./MyUndelete.py  -b /var/lib/mysql/mysql-bin.000008 -s 1514 -e 1725
+
+*** WARNING *** USE WITH CARE ****
+
+Binlog file is  /var/lib/mysql/mysql-bin.000008
+Start Position file is  1514
+End Postision file is  1725
+Event type (' ') is a delete v2
+Ready to revert the statement ? [y/n]
+y
+Done... I hope it worked ;)
+
+mysql> select * from fred;
++----+------------+
+| id | name       |
++----+------------+
+|  1 | Fred       |
+|  2 | Jen        |
+|  3 | Wilhelmine |
+|  4 | Héloïse    |
+|  5 | Suhi       |
++----+------------+
+5 rows in set (0.00 sec)
+
+```
+
 ### Un-insert
 
 
