@@ -240,7 +240,7 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
              continue
           old_record_pos = findnth(binlog_event_str_dec, to_find, i_rec * 2)
           # check is we have a garbagge end 6 bytes later
-          if binlog_event_str_dec[old_record_pos + 5] == to_find:
+          if binlog_event_str_dec[old_record_pos + 1] == to_find or binlog_event_str_dec[old_record_pos + 5] == to_find:
             new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
             new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 4) 
             next_one_to_skip = True
@@ -255,8 +255,10 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           new_image = binlog_event_str_dec[new_record_pos:new_record_end_pos]
           p_debug2("old record = %s" % repr(old_image))
           p_debug2("new record = %s" % repr(new_image))
-          garbage_pos = findnth(new_image, "\xf1", 0) 
-          if garbage_pos > 0:
+          garbage_chr = chr(255)
+          garbage_pos = findnth(new_image, garbage_chr, 0) 
+          if garbage_pos > 34:
+                garbage_pos = garbage_pos - 34 #CRC32
                 old_image = old_image + new_image[garbage_pos:]
           	new_image = new_image[:garbage_pos]
           	p_debug2("old record after cleaning (%s) = %s" % (garbage_pos, repr(old_image)))
@@ -284,17 +286,35 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
 
           c2 = ['/usr/bin/sudo', '/usr/bin/awk', 'BEGIN{ RS=\"\" } FILENAME==ARGV[1] { s=$0 } FILENAME==ARGV[2] { r=$0 } FILENAME==ARGV[3] { sub(s,r) ; print }',
                 f_old.name, f_new.name, "-"]  
-          p2 = subprocess.Popen(c2, stdin=p1.stdout, stdout=subprocess.PIPE)
-          
-          c3 = ['/usr/bin/sudo', '/bin/sed', "s/GTID_NEXT= '........-....-....-....-............*$/GTID_NEXT= 'AUTOMATIC';/"]
-          p3 = subprocess.Popen(c3, stdin=p2.stdout, stdout=subprocess.PIPE)
 
-          c4 = ['mysql']
-          p4 = subprocess.Popen(c4, stdin=p3.stdout)
-          print "Sending to mysql..."
+          after_awk_log = tempfile.NamedTemporaryFile(delete=False)
+          print "after_awk_log: %s" % after_awk_log.name
+
+          #p2 = subprocess.Popen(c2, stdin=p1.stdout, stdout=subprocess.PIPE)
+          p2 = subprocess.Popen(c2, stdin=p1.stdout, stdout=after_awk_log)
+
           p1.wait()
           p2.wait()
+
+          after_awk_log.close()
+          after_awk_log_f = open(after_awk_log.name, 'rb')
+          
+          new_bin_log = tempfile.NamedTemporaryFile(delete=False)
+          print "new_bin_log: %s" % new_bin_log.name
+
+          c3 = ['/usr/bin/sudo', '/bin/sed', "s/GTID_NEXT= '........-....-....-....-............*$/GTID_NEXT= 'AUTOMATIC';/"]
+          #p3 = subprocess.Popen(c3, stdin=p2.stdout, stdout=subprocess.PIPE)
+          p3 = subprocess.Popen(c3, stdin=after_awk_log_f, stdout=new_bin_log)
+
           p3.wait()
+
+          new_bin_log.close()
+          infile = open(new_bin_log.name, 'rb')
+      
+          c4 = ['mysql']
+          #p4 = subprocess.Popen(c4, stdin=p3.stdout)
+          p4 = subprocess.Popen(c4, stdin=infile)
+          print "Sending to mysql..."
           p4.wait()
 
           os.unlink(f_old.name)
