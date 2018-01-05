@@ -4,8 +4,8 @@
 # MyUndelete.py - MySQL undelete from ROW base binary logs
 #
 # Author : Frederic -lefred- Descamps <lefred@lefred.be>
-# Version: 0.3
-# Date   : 2018-01-05
+# Version: 0.2
+# Date   : 2014-11-29
 #
 # Use with care
 #
@@ -229,11 +229,25 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
       print "Total occurence of records =  %s" % total_records_in_event
       new_binlog_event_str_dec =  binlog_event_str_dec[0:32]
       # TODO: loop on each records to rebuild them      
+      next_one_to_skip = False
       for i_rec in range(0, total_records_in_event):
-          p_debug("rebuilding record %s of %s" % (i_rec, total_records_in_event))
+          #  old_record_pos = findnth(binlog_event_str_dec, to_find, i_rec * 2)
+          #  new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
+          #  new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 4) 
+          if next_one_to_skip == True:
+             p_debug("skipping fake record %s of %s" % (i_rec + 1, total_records_in_event))
+             next_one_to_skip = False
+             continue
           old_record_pos = findnth(binlog_event_str_dec, to_find, i_rec * 2)
-          new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 1) 
-          new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
+          # check is we have a garbagge end 6 bytes later
+          if binlog_event_str_dec[old_record_pos + 5] == to_find:
+            new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
+            new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 4) 
+            next_one_to_skip = True
+          else:
+            new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 1) 
+            new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
+          p_debug("rebuilding record %s of %s" % (i_rec + 1, total_records_in_event))
           p_debug2("old %s record starts at %s and finishes at %s" % (i_rec, old_record_pos, new_record_pos))
           p_debug2("new %s record starts at %s and finishes at %s" % (i_rec, new_record_pos, new_record_end_pos))
           if new_record_end_pos == -1: new_record_end_pos = -4
@@ -241,6 +255,12 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           new_image = binlog_event_str_dec[new_record_pos:new_record_end_pos]
           p_debug2("old record = %s" % repr(old_image))
           p_debug2("new record = %s" % repr(new_image))
+          garbage_pos = findnth(new_image, "\xf1", 0) 
+          if garbage_pos > 0:
+                old_image = old_image + new_image[garbage_pos:]
+          	new_image = new_image[:garbage_pos]
+          	p_debug2("old record after cleaning (%s) = %s" % (garbage_pos, repr(old_image)))
+          	p_debug2("new record after cleaning (%s) = %s" % (garbage_pos, repr(new_image)))
           new_binlog_event_str_dec = new_binlog_event_str_dec + new_image + old_image
       new_binlog_event_str_dec = new_binlog_event_str_dec + binlog_event_str_dec[-4:]
       new_binlog_envent_str_enc = base64.b64encode(new_binlog_event_str_dec)
