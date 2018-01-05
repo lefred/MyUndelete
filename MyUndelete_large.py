@@ -20,7 +20,8 @@ import tempfile
 import re
 from distutils.util import strtobool
 
-debug = False
+debug  = False
+debug2 = False
 
 def main(argv):
    binlog = ''
@@ -29,8 +30,9 @@ def main(argv):
    check_insert = False
    check_update = False
    global debug
+   global debug2
    try:
-      opts, args = getopt.getopt(argv,"hb:de:is:u",["binlog=","debug","end=","insert","start=","update"])
+      opts, args = getopt.getopt(argv,"hb:dDe:is:u",["binlog=","debug","debug2","end=","insert","start=","update"])
    except getopt.GetoptError:
       print 'MyUndelete.py -b <binlog> -s <start position> -e <end position> [-i] [-u] [-d]'
       sys.exit(2)
@@ -44,6 +46,7 @@ def main(argv):
          print '  -i | --insert   : consider also INSERT statements (by default, only DELETE)'
          print '  -u | --update   : consider also UPDATE statements (by default, only DELETE)'
          print '  -d | --debug    : add debug messages'
+         print '  -D | --debug2   : add debug messages related to records content'
          print ''
          print 'Info: The program expects that you have read access to the binary log'
          print 'and you have all eventual MySQL credential in ~/.my.cnf'
@@ -61,6 +64,8 @@ def main(argv):
          check_update = True
       elif opt in ("-d", "--debug"):
          debug = True
+      elif opt in ("-D", "--debug2"):
+         debug2 = True
 
    if binlog == '':
        print "ERROR: binlog file is required !"
@@ -93,6 +98,10 @@ def findnth(haystack, needle, n):
 def p_debug(msg):
     global debug
     if debug: print "DEBUG: " + msg
+
+def p_debug2(msg):
+    global debug2
+    if debug2: print "DEBUG REC: " + msg
 
 def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
 
@@ -176,11 +185,11 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
 
             c4 = ['mysql']
             p4 = subprocess.Popen(c4, stdin=p3.stdout)
-
-            p1.wait()
-            p2.wait()
-            p3.wait()
-            p4.wait()
+  
+	    p1.wait()
+	    p2.wait()
+	    p3.wait()
+	    p4.wait()
              
             print "Done... I hope it worked ;)"
             sys.exit(0) 
@@ -195,35 +204,48 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           sys.exit(5)
       # find the "marker" and the PK
       to_find = base64.b64decode(binlog_event[0])[32]
-      
+      p_debug("to_find = %s (%s)" % (repr(to_find), ord(to_find)))
+ 
       # let's concatenate to create the full binlog
       binlog_event_str = "".join(binlog_event)
-      binlog_event_str_dec = base64.b64decode(binlog_event_str)
-      if debug: p_debug("binlog_event = %s" % binlog_event_str)
-      if debug: p_debug("binlog_event_dec = %s" % repr(binlog_event_str_dec))
+      #binlog_event_str_dec = base64.b64decode(binlog_event_str)
+      f_bin = tempfile.NamedTemporaryFile(delete=False) 
+      f_bin.write(binlog_event_str)
+      f_bin.close()
+      #with open('/tmp/MyUndelete_dec', 'w+') as outfile:
+      f_bin_new_un = tempfile.NamedTemporaryFile(delete=False)
+      p_base = subprocess.Popen(["/bin/base64","-d",f_bin.name], stdout=f_bin_new_un)
+      p_base.communicate()
+      f_bin_new_un.close()
+      with open(f_bin_new_un.name, 'rb') as infile:
+         binlog_event_str_dec = infile.read() 
+      infile.close()
+      p_debug2("binlog_event = %s" % binlog_event_str)
+      p_debug2("binlog_event_dec = %s" % repr(binlog_event_str_dec))
 
       # find all occurence of to_find[0] so the byte at [32] to find how may records
       # are in the event, then for each of them we need to recreate everything
       total_records_in_event = int(binlog_event_str_dec.count(to_find)) / 2
-      if debug: p_debug("total occurence of records =  %s" % total_records_in_event)
+      print "Total occurence of records =  %s" % total_records_in_event
       new_binlog_event_str_dec =  binlog_event_str_dec[0:32]
       # TODO: loop on each records to rebuild them      
       for i_rec in range(0, total_records_in_event):
+          p_debug("rebuilding record %s of %s" % (i_rec, total_records_in_event))
           old_record_pos = findnth(binlog_event_str_dec, to_find, i_rec * 2)
           new_record_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 1) 
           new_record_end_pos = findnth(binlog_event_str_dec, to_find, (i_rec * 2) + 2) 
-          p_debug("old %s record starts at %s and finishes at %s" % (i_rec, old_record_pos, new_record_pos))
-          p_debug("new %s record starts at %s and finishes at %s" % (i_rec, new_record_pos, new_record_end_pos))
+          p_debug2("old %s record starts at %s and finishes at %s" % (i_rec, old_record_pos, new_record_pos))
+          p_debug2("new %s record starts at %s and finishes at %s" % (i_rec, new_record_pos, new_record_end_pos))
           if new_record_end_pos == -1: new_record_end_pos = -4
           old_image = binlog_event_str_dec[old_record_pos:new_record_pos]
           new_image = binlog_event_str_dec[new_record_pos:new_record_end_pos]
-          p_debug("DEBUG : old record = %s" % repr(old_image))
-          p_debug("new record = %s" % repr(new_image))
+          p_debug2("old record = %s" % repr(old_image))
+          p_debug2("new record = %s" % repr(new_image))
           new_binlog_event_str_dec = new_binlog_event_str_dec + new_image + old_image
       new_binlog_event_str_dec = new_binlog_event_str_dec + binlog_event_str_dec[-4:]
       new_binlog_envent_str_enc = base64.b64encode(new_binlog_event_str_dec)
-      p_debug("new ROW DEC = %s" % repr(new_binlog_event_str_dec)) 
-      p_debug("new ROW ENC = %s" % new_binlog_envent_str_enc)
+      p_debug2("new ROW DEC = %s" % repr(new_binlog_event_str_dec)) 
+      p_debug2("new ROW ENC = %s" % new_binlog_envent_str_enc)
       n = 76
       new_binlog_list = [new_binlog_envent_str_enc[i:i+n] for i in range(0, len(new_binlog_envent_str_enc), n)]
       
@@ -243,8 +265,8 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           c2 = ['/usr/bin/sudo', '/usr/bin/awk', 'BEGIN{ RS=\"\" } FILENAME==ARGV[1] { s=$0 } FILENAME==ARGV[2] { r=$0 } FILENAME==ARGV[3] { sub(s,r) ; print }',
                 f_old.name, f_new.name, "-"]  
           p2 = subprocess.Popen(c2, stdin=p1.stdout, stdout=subprocess.PIPE)
-         
-	  c3 = ['/usr/bin/sudo', '/bin/sed', "s/GTID_NEXT= '........-....-....-....-............*$/GTID_NEXT= 'AUTOMATIC';/"]
+          
+          c3 = ['/usr/bin/sudo', '/bin/sed', "s/GTID_NEXT= '........-....-....-....-............*$/GTID_NEXT= 'AUTOMATIC';/"]
           p3 = subprocess.Popen(c3, stdin=p2.stdout, stdout=subprocess.PIPE)
 
           c4 = ['mysql']
@@ -254,6 +276,7 @@ def mysqlbinlog(binlog, startpos, endpos, check_insert, check_update):
           p2.wait()
           p3.wait()
           p4.wait()
+
           os.unlink(f_old.name)
           os.unlink(f_new.name)
           print "Done... I hope it worked ;)"

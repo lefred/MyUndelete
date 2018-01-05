@@ -1,5 +1,8 @@
+0.3 : 2018-01-05
+	  Support for GTID
+
 0.2 : 2014-11-29
-      Support for unupdate v2
+	  Support for unupdate v2
 
 0.1 : 2014-11-19
-      Initial release. It supports undelete and uninsert
+	  Initial release. It supports undelete and uninsert
